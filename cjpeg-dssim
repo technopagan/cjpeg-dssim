@@ -1,0 +1,147 @@
+#!/usr/bin/env bash
+export LANG=C LC_NUMERIC=C LC_COLLATE=C
+#
+#
+#
+###############################################################################
+#
+# Description Text and usage instructions
+#
+#
+#
+###############################################################################
+#
+#
+#
+###############################################################################
+# RUNTIME VARIABLES
+###############################################################################
+
+# Check for proper runtime inputs
+# Filename and selected JPEG compressor should both be set
+if [ -z $1 ] || [ -z $2 ] || [ -z $3 ]; then
+	echo "Please select a JPEG compression method (currently supported: jpegoptim | mozjpeg | foobar) as well as input and output JPEGs"
+elif [ -n $1 ] && [ -n $2 ]; then
+	JPEG_COMPRESSION_SELECTION="$1"
+	INPUTFILE="$2"
+	OUTPUTFILE="$3"
+fi
+
+# Define our toolbelt of JPEG compression commands and make them selectable from the CLI
+case ${JPEG_COMPRESSION_SELECTION} in
+	"jpegoptim") JPEG_COMPRESSION_COMMAND="jpegoptim -q -p -f --max=\${__current_jpeg_quality} --strip-all --all-progressive --stdout \${INPUTFILE}";;
+	"mozjpeg") JPEG_COMPRESSION_COMMAND="mozjpeg -quality \${__current_jpeg_quality} -dct float \${INPUTFILE}";;
+   *) echo "Please select a JPEG compression method: jpegoptim | mozjpeg | foobar"; exit 1;;
+esac
+
+
+
+
+
+
+DSSIM_LOWER_BOUND="0.014500"
+DSSIM_UPPER_BOUND="0.016499"
+
+
+
+JPEG_QUALITY_LOWER_BOUND="68"
+JPEG_QUALITY_UPPER_BOUND="92"
+
+
+
+
+
+
+# Retrieve clean filename without extension
+CLEANFILENAME=${INPUTFILE%.jp*g}
+
+# Retrieve only the file extension
+FILEEXTENSION=${INPUTFILE##*.}
+
+# Retrieve clean path directory without filename
+CLEANPATH="${INPUTFILE%/*}"
+# If the JPEG is in the same direcctory as Adept, empty the path variable
+# Or if it is set, make sure the path has a trailing slash
+if [ "$CLEANPATH" == "$INPUTFILE" ]; then
+	CLEANPATH=""
+else
+	CLEANPATH="$CLEANPATH/"
+fi
+
+
+
+
+###############################################################################
+# MAIN PROGRAM
+###############################################################################
+
+main () {
+
+	# Calculate initial JPEG quality
+	local -i __jpeg_bound_difference_split=$(calculate_initial_jpeg_bound_difference_split)
+	local -i __current_jpeg_quality=$(calculate_initial_jpeg_quality_level ${__jpeg_bound_difference_split})
+
+	# Discover the optimal JPEG quality for this image by judging output dissimilarity
+	__current_jpeg_quality=$(optimize_quality_level ${__current_jpeg_quality} ${__jpeg_bound_difference_split})
+
+	# Finally compress the JPEG with the optimized quality setting
+	$(eval ${JPEG_COMPRESSION_COMMAND} > "${OUTPUTFILE}");
+
+	echo "FINAL JPEG quality setting: ${__current_jpeg_quality}";
+}
+
+
+
+###############################################################################
+# FUNCTIONS
+###############################################################################
+
+function calculate_initial_jpeg_bound_difference_split () {
+	local __jpeg_bound_difference=$(echo "scale=0; ${JPEG_QUALITY_UPPER_BOUND}-${JPEG_QUALITY_LOWER_BOUND}" | bc -l)
+	local __jpeg_bound_difference_split=$(echo "scale=0; ${__jpeg_bound_difference}/2" | bc -l)
+	echo ${__jpeg_bound_difference_split}
+}
+
+function calculate_initial_jpeg_quality_level () {
+	local __jpeg_bound_difference_split=$1
+	local __initial_jpeg_quality=$(echo "scale=0; ${JPEG_QUALITY_LOWER_BOUND}+${__jpeg_bound_difference_split}" | bc -l)
+	echo ${__initial_jpeg_quality}
+}
+
+function optimize_quality_level () {
+	local -i __current_jpeg_quality=$1
+	local -i __jpeg_bound_difference_split=$2
+	local -i __iteration_counter="0"
+	local __current_dssim_score="0"
+
+	while ( (( $(echo "${__current_dssim_score} >= ${DSSIM_UPPER_BOUND}" | bc -l) )) || (( $(echo "${__current_dssim_score} < ${DSSIM_LOWER_BOUND}" | bc -l) )) ) && (( ${__iteration_counter}<7 )); do
+
+		__current_dssim_score=$(calculate_dissimilarity "${__current_jpeg_quality}")
+
+		if (( $(echo "${__current_dssim_score} < ${DSSIM_LOWER_BOUND}" | bc -l) )); then
+			local __arithmetic_operator="-"
+		elif (( $(echo "${__current_dssim_score} >= ${DSSIM_UPPER_BOUND}" | bc -l) )); then
+			local __arithmetic_operator="+"
+		fi
+
+		__current_jpeg_quality=$(echo "scale=0; ${__current_jpeg_quality}${__arithmetic_operator}${__jpeg_bound_difference_split}/2" | bc -l)
+		__jpeg_bound_difference_split=$(echo "scale=0; ${__jpeg_bound_difference_split}/2" | bc -l)
+
+		(( __iteration_counter++ ))
+	done
+
+	echo ${__current_jpeg_quality}
+
+}
+
+function calculate_dissimilarity () {
+	local __current_jpeg_quality=$1
+	# Convert the original JPEG to PNG for DSSIM comparison
+	# Also base64 it so we can safely store its result in a variable without needing to write the file to disk
+	local __original_image_png_base64=$(convert "${INPUTFILE}" png:- | base64)
+	# Run the JPEG compressor, pipe its output to convert, create a PNG from the newly compressed JPEG and hand it to DSSIM for comparison - all without creating a file on disk to increase runtime performance
+	local __current_dissimilarity=$(eval ${JPEG_COMPRESSION_COMMAND} | convert - png:- | dssim <(echo "${__original_image_png_base64}" | base64 --decode) /dev/stdin | awk '{print $1}')
+	echo ${__current_dissimilarity}
+}
+
+main
