@@ -1,66 +1,49 @@
 #!/usr/bin/env bash
-export LANG=C LC_NUMERIC=C LC_COLLATE=C
-#
-#
-#
+
+
+
 ###############################################################################
 #
-# Description Text and usage instructions
+# Intro:
+# 	Automatically find the ideal JPEG quality setting for a JPEG image by
+#	calculating the output images dissimilarity from the input JPEG. This
+# 	frees us from having to rely on the unstandardized quality integer.
 #
+# Usage:
+# 	./cjpeg-dssim /path/to/input-image.jpg
 #
+# Required tools:
+#	* dssim - https://github.com/pornel/dssim
+#	* jpegoptim - https://github.com/tjko/jpegoptim
+#	* mozjpeg - https://github.com/mozilla/mozjpeg
 #
-###############################################################################
-#
-#
-#
-###############################################################################
-# RUNTIME VARIABLES
 ###############################################################################
 
-# Check for proper runtime inputs
+
+
+###############################################################################
+# SANITY CHECKS
+###############################################################################
+
+# Set locales to C (raw uninterpreted byte sequence) to avoid illegal byte sequence errors and invalid number errors
+export LANG=C LC_NUMERIC=C LC_COLLATE=C
+
+# Check for proper input parameters
 # Filename and selected JPEG compressor should both be set
-if [ -z $1 ] || [ -z $2 ] || [ -z $3 ]; then
-	echo "Please select a JPEG compression method (currently supported: jpegoptim | mozjpeg | foobar) as well as input and output JPEGs"
+if [ -z $1 ] || [ -z $2 ]; then
+	echo "Please select a JPEG compression method and input JPEG"
 elif [ -n $1 ] && [ -n $2 ]; then
 	JPEG_COMPRESSION_SELECTION="$1"
 	INPUTFILE="$2"
-	OUTPUTFILE="$3"
+else
+	exit 1
 fi
 
-# Define our toolbelt of JPEG compression commands and make them selectable from the CLI
-case ${JPEG_COMPRESSION_SELECTION} in
-	"jpegoptim") JPEG_COMPRESSION_COMMAND="jpegoptim -q -p -f --max=\${__current_jpeg_quality} --strip-all --all-progressive --stdout \${INPUTFILE}";;
-	"mozjpeg") JPEG_COMPRESSION_COMMAND="mozjpeg -quality \${__current_jpeg_quality} -dct float \${INPUTFILE}";;
-   *) echo "Please select a JPEG compression method: jpegoptim | mozjpeg | foobar"; exit 1;;
-esac
-
-
-
-
-
-
-DSSIM_LOWER_BOUND="0.014500"
-DSSIM_UPPER_BOUND="0.016499"
-
-
-
-JPEG_QUALITY_LOWER_BOUND="68"
-JPEG_QUALITY_UPPER_BOUND="92"
-
-
-
-
-
-
-# Retrieve clean filename without extension
+# Path and filename retrieval to save the output image
 CLEANFILENAME=${INPUTFILE%.jp*g}
-
-# Retrieve only the file extension
 FILEEXTENSION=${INPUTFILE##*.}
-
-# Retrieve clean path directory without filename
 CLEANPATH="${INPUTFILE%/*}"
-# If the JPEG is in the same direcctory as Adept, empty the path variable
+# If the JPEG is in the same direcctory, empty the path variable
 # Or if it is set, make sure the path has a trailing slash
 if [ "$CLEANPATH" == "$INPUTFILE" ]; then
 	CLEANPATH=""
@@ -70,24 +53,31 @@ fi
 
 
 
+###############################################################################
+# CONFIGURABLE RUNTIME VARIABLES
+###############################################################################
+
+# Initial JPEG quality and summand/subtrahend settings to start from
+INITIAL_JPEG_QUALITY="80"
+JPEG_QUALITY_SUMMAND_SUBTRAHEND="20"
+
+# The dissimilarity range in which we accept a recompressed JPEG image
+DSSIM_LOWER_BOUND="0.014250"
+DSSIM_UPPER_BOUND="0.016500"
+
+# How should the output image name be amended - Leave empty to overwrite
+OUTPUTFILESUFFIX="_dssim"
+
+
 
 ###############################################################################
 # MAIN PROGRAM
 ###############################################################################
 
 main () {
-
-	# Calculate initial JPEG quality
-	local -i __jpeg_bound_difference_split=$(calculate_initial_jpeg_bound_difference_split)
-	local -i __current_jpeg_quality=$(calculate_initial_jpeg_quality_level ${__jpeg_bound_difference_split})
-
-	# Discover the optimal JPEG quality for this image by judging output dissimilarity
-	__current_jpeg_quality=$(optimize_quality_level ${__current_jpeg_quality} ${__jpeg_bound_difference_split})
-
-	# Finally compress the JPEG with the optimized quality setting
-	$(eval ${JPEG_COMPRESSION_COMMAND} > "${OUTPUTFILE}");
-
-	echo "FINAL JPEG quality setting: ${__current_jpeg_quality}";
+	define_encoder_toolbelt
+	local -i __current_jpeg_quality=$(optimize_quality_level ${INITIAL_JPEG_QUALITY} ${JPEG_QUALITY_SUMMAND_SUBTRAHEND})
+	$(eval ${JPEG_COMPRESSION_COMMAND} > "${CLEANPATH}${CLEANFILENAME##*/}${OUTPUTFILESUFFIX}".${FILEEXTENSION});
 }
 
 
@@ -96,42 +86,40 @@ main () {
 # FUNCTIONS
 ###############################################################################
 
-function calculate_initial_jpeg_bound_difference_split () {
-	local __jpeg_bound_difference=$(echo "scale=0; ${JPEG_QUALITY_UPPER_BOUND}-${JPEG_QUALITY_LOWER_BOUND}" | bc -l)
-	local __jpeg_bound_difference_split=$(echo "scale=0; ${__jpeg_bound_difference}/2" | bc -l)
-	echo ${__jpeg_bound_difference_split}
-}
-
-function calculate_initial_jpeg_quality_level () {
-	local __jpeg_bound_difference_split=$1
-	local __initial_jpeg_quality=$(echo "scale=0; ${JPEG_QUALITY_LOWER_BOUND}+${__jpeg_bound_difference_split}" | bc -l)
-	echo ${__initial_jpeg_quality}
+function define_encoder_toolbelt () {
+	# Define our toolbelt of JPEG compression commands and make them selectable from the CLI
+	case ${JPEG_COMPRESSION_SELECTION} in
+		"jpegoptim") JPEG_COMPRESSION_COMMAND="jpegoptim -q -p -f --max=\${__current_jpeg_quality} --strip-all --all-progressive --stdout \${INPUTFILE}";;
+		"mozjpeg") JPEG_COMPRESSION_COMMAND="mozjpeg -quality \${__current_jpeg_quality} -dct float \${INPUTFILE}";;
+	   *) echo "Supported JPEG compression methods: jpegoptim | mozjpeg"; exit 1;;
+	esac
 }
 
 function optimize_quality_level () {
 	local -i __current_jpeg_quality=$1
-	local -i __jpeg_bound_difference_split=$2
+	local -i __current_jpeg_quality_summand_subtrahend=$2
 	local -i __iteration_counter="0"
 	local __current_dssim_score="0"
-
+	# While the result of the current run is either too similar (ecouraging stronger compression) or too different (already too many artifacts visible), run the compression again while homing in on a proper quality setting for the current encoder
 	while ( (( $(echo "${__current_dssim_score} >= ${DSSIM_UPPER_BOUND}" | bc -l) )) || (( $(echo "${__current_dssim_score} < ${DSSIM_LOWER_BOUND}" | bc -l) )) ) && (( ${__iteration_counter}<7 )); do
-
+		# Retrieve the current dissimilarity score
 		__current_dssim_score=$(calculate_dissimilarity "${__current_jpeg_quality}")
-
+		# Define if we need to add or substract from the current JPEG quality (DRY)
 		if (( $(echo "${__current_dssim_score} < ${DSSIM_LOWER_BOUND}" | bc -l) )); then
 			local __arithmetic_operator="-"
 		elif (( $(echo "${__current_dssim_score} >= ${DSSIM_UPPER_BOUND}" | bc -l) )); then
 			local __arithmetic_operator="+"
 		fi
-
-		__current_jpeg_quality=$(echo "scale=0; ${__current_jpeg_quality}${__arithmetic_operator}${__jpeg_bound_difference_split}/2" | bc -l)
-		__jpeg_bound_difference_split=$(echo "scale=0; ${__jpeg_bound_difference_split}/2" | bc -l)
-
+		# Binary-search-esque approach to home in on an acceptable JPEG quality by halfing the summand/subtrahend
+		__current_jpeg_quality_summand_subtrahend=$(echo "scale=0; ${__current_jpeg_quality_summand_subtrahend}/2" | bc -l)
+		if (( ${__current_jpeg_quality_summand_subtrahend}==0 )); then
+			__current_jpeg_quality_summand_subtrahend="1"
+		fi
+		# Set the JPEG quality to the newly calculated value
+		__current_jpeg_quality=$(echo "scale=0; ${__current_jpeg_quality}${__arithmetic_operator}${__current_jpeg_quality_summand_subtrahend}" | bc -l)
 		(( __iteration_counter++ ))
 	done
-
 	echo ${__current_jpeg_quality}
-
 }
 
 function calculate_dissimilarity () {
