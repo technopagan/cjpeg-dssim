@@ -8,9 +8,9 @@ Automatically find the ideal JPEG quality setting for a JPEG image by calculatin
 Place this script anywhere in your $PATH. Requires Bash >= 4.x
 
 ## Required tools
-	* dssim - https://github.com/pornel/dssim
-	* jpegoptim - https://github.com/tjko/jpegoptim
-	* mozjpeg - https://github.com/mozilla/mozjpeg
+* dssim - https://github.com/pornel/dssim
+* jpegoptim - https://github.com/tjko/jpegoptim
+* mozjpeg - https://github.com/mozilla/mozjpeg
 
 ## CLI usage
-cjpeg-dssim /path/to/input-image.jpg
+	cjpeg-dssim /path/to/input-image.jpg
