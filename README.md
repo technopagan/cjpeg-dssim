@@ -12,5 +12,9 @@ Place this script anywhere in your $PATH. Requires Bash >= 4.x
 * jpegoptim - https://github.com/tjko/jpegoptim
 * mozjpeg - https://github.com/mozilla/mozjpeg
 
-## CLI usage
-	cjpeg-dssim /path/to/input-image.jpg
+## CLI usage example
+	cjpeg-dssim jpegoptim /path/to/input-image.jpg
+
+Supported encoders:
+* jpegoptim
+* mozjpeg
