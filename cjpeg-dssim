@@ -13,6 +13,7 @@
 #	Place this script anywhere in your $PATH. Requires Bash >= 4.x
 #
 # Required tools:
+#	* ImageMagick >= v.6
 #	* dssim - https://github.com/pornel/dssim
 #	* jpegoptim - https://github.com/tjko/jpegoptim
 #	* mozjpeg - https://github.com/mozilla/mozjpeg
@@ -73,7 +74,7 @@ DSSIM_LOWER_BOUND="0.014250"
 DSSIM_UPPER_BOUND="0.016500"
 
 # How should the output image name be amended - Leave empty to overwrite
-OUTPUTFILESUFFIX="_dssim"
+OUTPUTFILESUFFIX="_cjpeg_dssim"
 
 
 
@@ -97,7 +98,7 @@ function define_encoder_toolbelt () {
 	# Define our toolbelt of JPEG compression commands and make them selectable from the CLI
 	case ${JPEG_COMPRESSION_SELECTION} in
 		"jpegoptim") JPEG_COMPRESSION_COMMAND="jpegoptim -q -p -f --max=\${__current_jpeg_quality} --strip-all --all-progressive --stdout \${INPUTFILE}";;
-		"mozjpeg") JPEG_COMPRESSION_COMMAND="mozjpeg -quality \${__current_jpeg_quality} -dct float \${INPUTFILE}";;
+		"mozjpeg") JPEG_COMPRESSION_COMMAND="mozjpeg -quality \${__current_jpeg_quality} \${INPUTFILE}";;
 	   *) echo "Supported JPEG compression methods: jpegoptim | mozjpeg"; exit 1;;
 	esac
 }
